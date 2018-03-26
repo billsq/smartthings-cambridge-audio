@@ -18,7 +18,7 @@ def deviceDiscovery() {
     def options = [:]
     def devices = getVerifiedDevices()
     devices.each {
-        def value = "${it.value.name} [${it.value.model}]"
+        def value = "${it.value.name} [Model: ${it.value.model}]"
         def key = it.value.mac
         options["${key}"] = value
     }
@@ -66,13 +66,14 @@ void ssdpSubscribe() {
 
 void ssdpDiscover() {
     sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:UuVol-com:service:UuVolControl:5", physicalgraph.device.Protocol.LAN))
+    sendHubCommand(new physicalgraph.device.HubAction("lan discovery upnp:rootdevice", physicalgraph.device.Protocol.LAN))
 }
 
 Map verifiedDevices() {
     def devices = getVerifiedDevices()
     def map = [:]
     devices.each {
-        def value = "${it.value.name} [${it.value.model}]"
+        def value = "${it.value.name} [Model: ${it.value.model}]"
         def key = it.value.mac
         map["${key}"] = value
     }
@@ -88,7 +89,14 @@ void verifyDevices() {
 
         log.debug("verifyDevices host=${host} path=${it.value.ssdpPath}")
 
-        sendHubCommand(new physicalgraph.device.HubAction("""GET ${it.value.ssdpPath} HTTP/1.1\r\nHOST: $host\r\n\r\n""", physicalgraph.device.Protocol.LAN, host, [callback: deviceDescriptionHandler]))
+        sendHubCommand(new physicalgraph.device.HubAction([
+                path: it.value.ssdpPath,
+                method: "GET",
+                headers: [Host: host]
+            ],
+            host,
+            [callback: deviceDescriptionHandler]
+        ))
     }
 }
 
@@ -123,7 +131,14 @@ def addDevices() {
                     "mac": selectedDevice.value.mac,
                     "ip": selectedDevice.value.networkAddress,
                     "port": selectedDevice.value.deviceAddress,
-                    "configPath": selectedDevice.value.ssdpUSN.split(':')[1]
+                    "RenderingControlControlPath": selectedDevice.value.RenderingControlControlPath,
+                    "RenderingControlEventPath": selectedDevice.value.RenderingControlEventPath,
+                    "AVTransportControlPath": selectedDevice.value.AVTransportControlPath,
+                    "AVTransportEventPath": selectedDevice.value.AVTransportEventPath,
+                    "RecivaRadioControlPath": selectedDevice.value.RecivaRadioControlPath,
+                    "RecivaRadioEventPath": selectedDevice.value.RecivaRadioEventPath,
+                    "RecivaSimpleRemoteControlPath": selectedDevice.value.RecivaSimpleRemoteControlPath,
+                    "RecivaSimpleRemoteEventPath": selectedDevice.value.RecivaSimpleRemoteEventPath
                 ]
             ])
         }
@@ -140,9 +155,10 @@ def ssdpHandler(evt) {
     log.debug "parsedEvent ${parsedEvent}"
 
     def devices = getDevices()
-    String ssdpUSN = parsedEvent.ssdpUSN.toString()
-    if (devices."${ssdpUSN}") {
-        def d = devices."${ssdpUSN}"
+    def uuid = parsedEvent.ssdpUSN.toString().split(":")[1]
+
+    if (devices."${uuid}") {
+        def d = devices."${uuid}"
         if (d.networkAddress != parsedEvent.networkAddress || d.deviceAddress != parsedEvent.deviceAddress) {
             d.networkAddress = parsedEvent.networkAddress
             d.deviceAddress = parsedEvent.deviceAddress
@@ -152,17 +168,90 @@ def ssdpHandler(evt) {
             }
         }
     } else {
-        devices << ["${ssdpUSN}": parsedEvent]
+        devices << ["${uuid}": parsedEvent]
     }
 }
 
 void deviceDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
     def body = hubResponse.xml
     def devices = getDevices()
-    def device = devices.find { it?.key?.contains(body?.device?.UDN?.text()) }
-    if (device) {
-        device.value << [name: body?.device?.friendlyName?.text(), model:body?.device?.modelName?.text(), serialNumber:body?.device?.serialNum?.text(), verified: true]
+    def device = devices.find { it?.key?.contains(body?.device?.UDN?.text().split(":")[1]) }
 
+    if (device && body?.device?.manufacturer?.text() == "Cambridge Audio") {
+        device.value << [name: body?.device?.friendlyName?.text(), model:body?.device?.modelName?.text(), serialNumber:body?.device?.serialNum?.text()]
+        def verified = 0
+
+        if (body?.device?.serviceList?.service?.size()) {
+            def services = body?.device?.serviceList?.service
+
+            services.each {
+                if (it.serviceType?.text().contains("RenderingControl")) {
+                    def control = it.controlURL?.text()
+                    def event = it.eventSubURL?.text()
+
+                    if (!control.startsWith("/")) {
+                        control = "/" + control
+                    }
+
+                    if (!event.startsWith("/")) {
+                        event = "/" + event
+                    }
+
+                    log.info "Got RenderingControl control=${control} event=${event} for device ${device.value["name"]}"
+                    device.value << [RenderingControlControlPath: control, RenderingControlEventPath: event]
+                    verified += 1
+                } else if (it.serviceType?.text().contains("AVTransport")) {
+                    def control = it.controlURL?.text()
+                    def event = it.eventSubURL?.text()
+
+                    if (!control.startsWith("/")) {
+                        control = "/" + control
+                    }
+
+                    if (!event.startsWith("/")) {
+                        event = "/" + event
+                    }
+
+                    log.info "Got AVTransport control=${control} event=${event} for device ${device.value["name"]}"
+                    device.value << [AVTransportControlPath: control, AVTransportEventPath: event]
+                    verified += 1
+                } else if (it.serviceType?.text().contains("UuVolControl")) {
+                    def control = it.controlURL?.text()
+                    def event = it.eventSubURL?.text()
+
+                    if (!control.startsWith("/")) {
+                        control = "/" + control
+                    }
+
+                    if (!event.startsWith("/")) {
+                        event = "/" + event
+                    }
+
+                    log.info "Got RecivaRadio control=${control} event=${event} for device ${device.value["name"]}"
+                    device.value << [RecivaRadioControlPath: control, RecivaRadioEventPath: event]
+                    verified += 1
+                } else if (it.serviceType?.text().contains("UuVolSimpleRemote")) {
+                    def control = it.controlURL?.text()
+                    def event = it.eventSubURL?.text()
+
+                    if (!control.startsWith("/")) {
+                        control = "/" + control
+                    }
+
+                    if (!event.startsWith("/")) {
+                        event = "/" + event
+                    }
+
+                    log.info "Got RecivaSimpleRemoteControl control=${control} event=${event} for device ${device.value["name"]}"
+                    device.value << [RecivaSimpleRemoteControlPath: control, RecivaSimpleRemoteEventPath: event]
+                    verified += 1
+                }
+            }
+        }
+
+        if (verified == 4) {
+            device.value << [verified: true]
+        }
         log.debug "deviceDescriptionHandler device.value=${device.value}"
     }
 }

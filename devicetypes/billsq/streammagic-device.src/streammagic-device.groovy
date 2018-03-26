@@ -6,6 +6,7 @@ metadata {
         capability "Refresh"
         capability "Sensor"
         capability "Music Player"
+        capability "Switch Level"
     }
 
     simulator {}
@@ -102,7 +103,7 @@ def parse(String description) {
                 def volume = event?.InstanceID?.Volume?.@val?.toInteger()
                 def mute = event?.InstanceID?.Mute?.@val?.toBoolean() ? "muted" : "unmuted"
 
-                log.debug "Got volume=${volume} mute=${mute} maxVolume=${state.maxVolume}"
+                log.trace "Got volume=${volume} mute=${mute} maxVolume=${state.maxVolume}"
 
                 def level = Math.round(volume * 100 / state.maxVolume)
 
@@ -121,7 +122,7 @@ def parse(String description) {
                     status = "paused"
                 }
 
-                log.debug "Got TransportState=${transportState} status=${status}"
+                log.trace "Got TransportState=${transportState} status=${status}"
                 events << createEvent(name: "status", value: status)
             }
         } else if (body?.property?.PlaybackXML?.text()) {
@@ -133,7 +134,7 @@ def parse(String description) {
             def trackText = ""
 
             if (device.currentValue("switch") == "off") {
-                trackDesc = "Standby"
+                trackDesc = ""
             } else if (playback.'playback-details'?.'playlist-entry'?.size()) {
                 trackData["name"] = playback?.'playback-details'?.'playlist-entry'?.title?.text()
                 trackData["artist"] = playback?.'playback-details'?.'playlist-entry'?.artist?.text()
@@ -168,59 +169,60 @@ private String convertHexToIP(hex) {
 }
 
 private String getHostAddress() {
-     def ip = convertHexToIP(getDataValue("ip"))
-     def port = convertHexToInt(getDataValue("port"))
+    def ip = convertHexToIP(getDataValue("ip"))
+    def port = convertHexToInt(getDataValue("port"))
     def host = "${ip}:${port}"
 
-     log.debug "Using host: ${host} for device: ${device.label}"
+    log.debug "Using host: ${host} for device: ${device.label}"
 
-     return host
+    return host
 }
 
 private String getCallBackAddress() {
     def address = "${device.hub.getDataValue("localIP")}:${device.hub.getDataValue("localSrvPortTCP")}"
 
-     log.debug "callbackAddress ${address}"
+    log.debug "callbackAddress ${address}"
 
-     return address
+    return address
 }
 
 def installed() {
-     log.debug "Executing installed() for ${device.label}"
+    log.debug "Executing installed() for ${device.label}"
     initialize()
 }
 
 def updated() {
-     log.debug "Executing updated() for ${device.label}"
+    log.debug "Executing updated() for ${device.label}"
     initialize()
 }
 
 def initialize() {
-     log.debug "Executing initialize() for ${device.label}"
+    log.debug "Executing initialize() for ${device.label}"
     state.maxVolume = 30
     refresh()
 }
 
 def refresh() {
-     log.debug "Executing refresh() for ${device.label}"
+    log.debug "Executing refresh() for ${device.label}"
 
     unschedule(resubscribeRecivaRadio)
     unschedule(resubscribeRenderingControl)
+    unschedule(resubscribeAVTransport)
 
     subscribe(["RecivaRadio", "RenderingControl", "AVTransport"])
 
-     poll()
-}
-
-def poll() {
-     log.debug "Executing poll() for ${device.label}"
-
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaRadio/invoke",
+        path:    getDataValue("RecivaRadioControlPath"),
         urn:     "urn:UuVol-com:service:UuVolControl:5",
         action:  "GetPowerState",
         headers: [Host: getHostAddress()]
     )
+}
+
+def poll() {
+    log.debug "Executing poll() for ${device.label}"
+
+    refresh()
 }
 
 def sync(ip, port) {
@@ -235,10 +237,10 @@ def sync(ip, port) {
 }
 
 def on() {
-    log.debug "Executing 'on' path ${getDataValue("configPath")}"
+    log.debug "Executing on() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaRadio/invoke",
+        path:    getDataValue("RecivaRadioControlPath"),
         urn:     "urn:UuVol-com:service:UuVolControl:5",
         action:  "SetPowerState",
         body:    [NewPowerStateValue: "ON"],
@@ -247,10 +249,10 @@ def on() {
 }
 
 def off() {
-    log.debug "Executing 'off' path ${getDataValue("configPath")}"
+    log.debug "Executing off() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaRadio/invoke",
+        path:    getDataValue("RecivaRadioControlPath"),
         urn:     "urn:UuVol-com:service:UuVolControl:5",
         action:  "SetPowerState",
         body:    [NewPowerStateValue: "IDLE"],
@@ -261,10 +263,10 @@ def off() {
 def setLevel(level) {
     def volume = Math.round(level * state.maxVolume / 100)
 
-     log.debug "Executing setLevel() for ${device.label} level=${level} volume=${volume}"
+    log.debug "Executing setLevel() for ${device.label} level=${level} volume=${volume}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RenderingControl/invoke",
+        path:    getDataValue("RenderingControlControlPath"),
         urn:     "urn:schemas-upnp-org:service:RenderingControl:1",
         action:  "SetVolume",
         body:    [InstanceID: 0, Channel: "Master", DesiredVolume: volume],
@@ -273,10 +275,10 @@ def setLevel(level) {
 }
 
 def mute() {
-     log.debug "Executing mute() for ${device.label}"
+    log.debug "Executing mute() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RenderingControl/invoke",
+        path:    getDataValue("RenderingControlControlPath"),
         urn:     "urn:schemas-upnp-org:service:RenderingControl:1",
         action:  "SetMute",
         body:    [InstanceID: 0, Channel: "Master", DesiredMute: 1],
@@ -285,10 +287,10 @@ def mute() {
 }
 
 def unmute() {
-     log.debug "Executing unmute() for ${device.label}"
+    log.debug "Executing unmute() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RenderingControl/invoke",
+        path:    getDataValue("RenderingControlControlPath"),
         urn:     "urn:schemas-upnp-org:service:RenderingControl:1",
         action:  "SetMute",
         body:    [InstanceID: 0, Channel: "Master", DesiredMute: 0],
@@ -297,10 +299,10 @@ def unmute() {
 }
 
 def play() {
-     log.debug "Executing play() for ${device.label}"
+    log.debug "Executing play() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaSimpleRemote/invoke",
+        path:    getDataValue("RecivaSimpleRemoteControlPath"),
         urn:     "urn:UuVol-com:service:UuVolSimpleRemote:1",
         action:  "KeyPressed",
         body:    [Key: "PLAY", Duration: "SHORT"],
@@ -309,10 +311,10 @@ def play() {
 }
 
 def pause() {
-     log.debug "Executing pause() for ${device.label}"
+    log.debug "Executing pause() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaSimpleRemote/invoke",
+        path:    getDataValue("RecivaSimpleRemoteControlPath"),
         urn:     "urn:UuVol-com:service:UuVolSimpleRemote:1",
         action:  "KeyPressed",
         body:    [Key: "PAUSE", Duration: "SHORT"],
@@ -321,10 +323,10 @@ def pause() {
 }
 
 def stop() {
-     log.debug "Executing stop() for ${device.label}"
+    log.debug "Executing stop() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaSimpleRemote/invoke",
+        path:    getDataValue("RecivaSimpleRemoteControlPath"),
         urn:     "urn:UuVol-com:service:UuVolSimpleRemote:1",
         action:  "KeyPressed",
         body:    [Key: "STOP", Duration: "SHORT"],
@@ -333,10 +335,10 @@ def stop() {
 }
 
 def nextTrack() {
-     log.debug "Executing nextTrack() for ${device.label}"
+    log.debug "Executing nextTrack() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaSimpleRemote/invoke",
+        path:    getDataValue("RecivaSimpleRemoteControlPath"),
         urn:     "urn:UuVol-com:service:UuVolSimpleRemote:1",
         action:  "KeyPressed",
         body:    [Key: "SKIP_NEXT", Duration: "SHORT"],
@@ -345,10 +347,10 @@ def nextTrack() {
 }
 
 def previousTrack() {
-     log.debug "Executing previousTrack() for ${device.label}"
+    log.debug "Executing previousTrack() for ${device.label}"
 
     new physicalgraph.device.HubSoapAction(
-        path:    "/${getDataValue("configPath")}/RecivaSimpleRemote/invoke",
+        path:    getDataValue("RecivaSimpleRemoteControlPath"),
         urn:     "urn:UuVol-com:service:UuVolSimpleRemote:1",
         action:  "KeyPressed",
         body:    [Key: "SKIP_PREVIOUS", Duration: "SHORT"],
@@ -357,19 +359,19 @@ def previousTrack() {
 }
 
 def playTrack(trackToPlay) {
-     log.debug "Executing previousTrack() for ${device.label} track=${trackToPlay}"
+    log.debug "Executing previousTrack() for ${device.label} track=${trackToPlay}"
 }
 
 def restoreTrack(trackToRestore) {
-     log.debug "Executing restoreTrack() for ${device.label} track=${trackToRestore}"
+    log.debug "Executing restoreTrack() for ${device.label} track=${trackToRestore}"
 }
 
 def resumeTrack(trackToResume) {
-     log.debug "Executing resumeTrack() for ${device.label} track=${trackToResume}"
+    log.debug "Executing resumeTrack() for ${device.label} track=${trackToResume}"
 }
 
 def setTrack(trackToSet) {
-     log.debug "Executing setTrack() for ${device.label} track=${trackToSet}"
+    log.debug "Executing setTrack() for ${device.label} track=${trackToSet}"
 }
 
 // subscription
@@ -379,7 +381,7 @@ def subscribe(List events) {
 
     events.each {
         sendHubCommand(new physicalgraph.device.HubAction([
-                path: "/${getDataValue("configPath")}/${it}/event",
+                path: getDataValue("${it}EventPath"),
                 method: "SUBSCRIBE",
                 headers: [
                     "Host": "${getHostAddress()}",
@@ -388,7 +390,7 @@ def subscribe(List events) {
                     "TIMEOUT": "Second-1800"
                 ]
             ],
-            "${device.label}|${it}|subscribe",
+            getDataValue("mac"),
             [callback: "subscribeHandler${it}"]
         ))
     }
@@ -399,7 +401,7 @@ def resubscribe(event, sid) {
     log.debug "Executing resubscribe() on ${address} for event ${event} sid ${sid}"
 
     sendHubCommand(new physicalgraph.device.HubAction([
-            path: "/${getDataValue("configPath")}/${event}/event",
+            path: getDataValue("${event}EventPath"),
             method: "SUBSCRIBE",
             headers: [
                 "Host": "${getHostAddress()}",
@@ -407,7 +409,7 @@ def resubscribe(event, sid) {
                 "TIMEOUT": "Second-1800"
             ]
         ],
-        "${device.label}|${event}|resubscribe",
+        getDataValue("mac"),
         [callback: "subscribeHandler${event}"]
     ))
 }
@@ -435,12 +437,7 @@ def resubscribeRecivaRadio() {
     def sid = state.recivaRadioSid
     log.debug "Executing resubscribeRecivaRadio() sid=${sid}"
 
-    if (!sid) {
-        log.debug "sid not found, subscribe again"
-        subscribe(["RecivaRadio"])
-    } else {
-        resubscribe("RecivaRadio", sid)
-    }
+    subscribe(["RecivaRadio"])
 }
 
 void subscribeHandlerRecivaRadio(physicalgraph.device.HubResponse hubResponse) {
@@ -461,12 +458,7 @@ def resubscribeRenderingControl() {
     def sid = state.renderingControlSid
     log.debug "Executing resubscribeRenderingControl() sid=${sid}"
 
-    if (!sid) {
-        log.debug "sid not found, subscribe again"
-        subscribe(["RenderingControl"])
-    } else {
-        resubscribe("RenderingControl", sid)
-    }
+    subscribe(["RenderingControl"])
 }
 
 void subscribeHandlerRenderingControl(physicalgraph.device.HubResponse hubResponse) {
@@ -482,17 +474,12 @@ void subscribeHandlerRenderingControl(physicalgraph.device.HubResponse hubRespon
     runIn(timeout, resubscribeRenderingControl)
 }
 
-// RenderingControl
+// AVTransport
 def resubscribeAVTransport() {
     def sid = state.avTransportSid
     log.debug "Executing resubscribeAVTransport() sid=${sid}"
 
-    if (!sid) {
-        log.debug "sid not found, subscribe again"
-        subscribe(["AVTransport"])
-    } else {
-        resubscribe("AVTransport", sid)
-    }
+    subscribe(["AVTransport"])
 }
 
 void subscribeHandlerAVTransport(physicalgraph.device.HubResponse hubResponse) {

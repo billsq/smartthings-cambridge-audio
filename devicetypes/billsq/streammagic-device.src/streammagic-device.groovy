@@ -102,10 +102,11 @@ def parse(String description) {
                 state.maxVolume = event?.InstanceID?.VolumeMax?.@val?.toInteger()
                 def volume = event?.InstanceID?.Volume?.@val?.toInteger()
                 def mute = event?.InstanceID?.Mute?.@val?.toBoolean() ? "muted" : "unmuted"
+                def VolumeDB = event?.InstanceID?.VolumeDB?.@val?.toInteger()
 
-                log.trace "Got volume=${volume} mute=${mute} maxVolume=${state.maxVolume}"
+                log.trace "Got volume=${volume} mute=${mute} maxVolume=${state.maxVolume} VolumeDB=${VolumeDB}"
 
-                def level = Math.round(volume * 100 / state.maxVolume)
+                def level = (volume > 0) ? (VolumeDB + 24832) / 256 : 0
 
                 events << createEvent(name: "level", value: level)
                 events << createEvent(name: "mute", value: mute)
@@ -261,14 +262,15 @@ def off() {
 }
 
 def setLevel(level) {
-    def volume = Math.round(level * state.maxVolume / 100)
+    //def volume = Math.round(level * state.maxVolume / 100)
+	def volume = ((level > 97) ? 97 : level) * 256 - 24832
 
     log.debug "Executing setLevel() for ${device.label} level=${level} volume=${volume}"
 
     new physicalgraph.device.HubSoapAction(
         path:    getDataValue("RenderingControlControlPath"),
         urn:     "urn:schemas-upnp-org:service:RenderingControl:1",
-        action:  "SetVolume",
+        action:  "SetVolumeDB",
         body:    [InstanceID: 0, Channel: "Master", DesiredVolume: volume],
         headers: [Host: getHostAddress()]
     )

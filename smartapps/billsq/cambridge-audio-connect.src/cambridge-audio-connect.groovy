@@ -138,7 +138,9 @@ def addDevices() {
                     "RecivaRadioControlPath": selectedDevice.value.RecivaRadioControlPath,
                     "RecivaRadioEventPath": selectedDevice.value.RecivaRadioEventPath,
                     "RecivaSimpleRemoteControlPath": selectedDevice.value.RecivaSimpleRemoteControlPath,
-                    "RecivaSimpleRemoteEventPath": selectedDevice.value.RecivaSimpleRemoteEventPath
+                    "RecivaSimpleRemoteEventPath": selectedDevice.value.RecivaSimpleRemoteEventPath,
+                    "StreamMagic6ControlPath": selectedDevice.value.StreamMagic6ControlPath,
+                    "StreamMagic6EventPath": selectedDevice.value.StreamMagic6EventPath
                 ]
             ])
         }
@@ -242,14 +244,29 @@ void deviceDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
                         event = "/" + event
                     }
 
-                    log.info "Got RecivaSimpleRemoteControl control=${control} event=${event} for device ${device.value["name"]}"
+                    log.info "Got RecivaSimpleRemote control=${control} event=${event} for device ${device.value["name"]}"
                     device.value << [RecivaSimpleRemoteControlPath: control, RecivaSimpleRemoteEventPath: event]
+                    verified += 1
+                } else if (it.serviceType?.text().contains("StreamMagic6")) {
+                    def control = it.controlURL?.text()
+                    def event = it.eventSubURL?.text()
+
+                    if (!control.startsWith("/")) {
+                        control = "/" + control
+                    }
+
+                    if (!event.startsWith("/")) {
+                        event = "/" + event
+                    }
+
+                    log.info "Got StreamMagic6 control=${control} event=${event} for device ${device.value["name"]}"
+                    device.value << [StreamMagic6ControlPath: control, StreamMagic6EventPath: event]
                     verified += 1
                 }
             }
         }
 
-        if (verified == 4) {
+        if (verified >= 5) {
             device.value << [verified: true]
         }
         log.debug "deviceDescriptionHandler device.value=${device.value}"

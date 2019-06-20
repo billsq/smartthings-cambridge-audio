@@ -74,25 +74,12 @@ def parse(String description) {
     def bodyString = msg.body
     if (bodyString) {
         def body = new XmlSlurper().parseText(bodyString.replaceAll("[^\\x20-\\x7e]", ""))
+        def powerState = null
 
-         if (body?.Body?.GetPowerStateResponse?.RetPowerStateValue?.text()) {
-            def powerState = body?.Body?.GetPowerStateResponse?.RetPowerStateValue?.text()
-
-             log.trace "Got GetPowerStateResponse = ${powerState}"
-
-            events << createEvent(name: "switch", value: (powerState == "ON") ? "on" : "off")
-            if (powerState != "ON") {
-                events << createEvent(name: "trackDescription", value: "")
-            }
+        if (body?.Body?.GetPowerStateResponse?.RetPowerStateValue?.text()) {
+            powerState = body?.Body?.GetPowerStateResponse?.RetPowerStateValue?.text()
         } else if (body?.property?.PowerState?.text()) {
-            def powerState = body?.property?.PowerState?.text()
-
-             log.trace "Got new power state = ${powerState}"
-
-            events << createEvent(name: "switch", value: (powerState == "ON") ? "on" : "off")
-            if (powerState != "ON") {
-                events << createEvent(name: "trackDescription", value: "")
-            }
+            powerState = body?.property?.PowerState?.text()
         } else if (body?.property?.LastChange?.text()) {
             def lastChange = body?.property?.LastChange?.text()
             def event = new XmlSlurper().parseText(lastChange)
@@ -156,9 +143,28 @@ def parse(String description) {
         } else {
             log.debug "Unparsed body ${bodyString}"
         }
-     }
 
-     return events
+        if (powerState != null) {
+            log.trace "Got GetPowerStateResponse = ${powerState}"
+
+            events << createEvent(name: "switch", value: (powerState == "ON") ? "on" : "off")
+
+            if (powerState != "ON") {
+                events << createEvent(name: "trackDescription", value: "")
+            }
+
+            // Turn on the amp on Control Bus
+            sendHubCommand(new physicalgraph.device.HubSoapAction(
+                path:    getDataValue("StreamMagic6ControlPath"),
+                urn:     "urn:UuVol-com:service:StreamMagic6:1",
+                action:  "SendCommand",
+                body:    [Command: "1072", Data: (powerState == "ON") ? "106e" : "106f"],
+                headers: [Host: getHostAddress()]
+            ))
+        }
+    }
+
+    return events
 }
 
 private Integer convertHexToInt(hex) {
@@ -173,17 +179,13 @@ private String getHostAddress() {
     def ip = convertHexToIP(getDataValue("ip"))
     def port = convertHexToInt(getDataValue("port"))
     def host = "${ip}:${port}"
-
     log.debug "Using host: ${host} for device: ${device.label}"
-
     return host
 }
 
 private String getCallBackAddress() {
     def address = "${device.hub.getDataValue("localIP")}:${device.hub.getDataValue("localSrvPortTCP")}"
-
     log.debug "callbackAddress ${address}"
-
     return address
 }
 
@@ -263,7 +265,7 @@ def off() {
 
 def setLevel(level) {
     //def volume = Math.round(level * state.maxVolume / 100)
-	def volume = ((level > 97) ? 97 : level) * 256 - 24832
+    def volume = ((level > 97) ? 97 : level) * 256 - 24832
 
     log.debug "Executing setLevel() for ${device.label} level=${level} volume=${volume}"
 

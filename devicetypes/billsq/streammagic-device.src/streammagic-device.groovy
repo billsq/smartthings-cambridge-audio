@@ -6,7 +6,6 @@ metadata {
         capability "Refresh"
         capability "Sensor"
         capability "Music Player"
-        capability "Switch Level"
     }
 
     simulator {}
@@ -93,7 +92,7 @@ def parse(String description) {
 
                 log.trace "Got volume=${volume} mute=${mute} maxVolume=${state.maxVolume} VolumeDB=${VolumeDB}"
 
-                def level = (volume > 0) ? (VolumeDB + 24832) / 256 : 0
+                def level = Math.round((volume > 0) ? (VolumeDB + 24832) / 256 : 0)
 
                 events << createEvent(name: "level", value: level)
                 events << createEvent(name: "mute", value: mute)
@@ -144,8 +143,10 @@ def parse(String description) {
             log.debug "Unparsed body ${bodyString}"
         }
 
-        if (powerState != null) {
+        if (powerState) {
+        	powerState = powerState.trim()
             log.trace "Got GetPowerStateResponse = ${powerState}"
+            events << createEvent(name: "GetPowerStateResponse", value: powerState)
 
             events << createEvent(name: "switch", value: (powerState == "ON") ? "on" : "off")
 
